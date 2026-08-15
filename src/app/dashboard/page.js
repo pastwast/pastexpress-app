@@ -37,12 +37,45 @@ function fileToResizedBase64(file) {
   });
 }
  
+// Les coordonnées sont plus fiables que le texte pour un GPS :
+// on les utilise dès qu'on les a, sinon on retombe sur l'adresse écrite.
+function stopTarget(stop) {
+  if (stop.lat != null && stop.lng != null) return `${stop.lat},${stop.lng}`;
+  return stop.label || stop.rawAddress;
+}
+ 
+function wazeUrl(stop) {
+  if (stop.lat != null && stop.lng != null) {
+    return `https://waze.com/ul?ll=${stop.lat}%2C${stop.lng}&navigate=yes`;
+  }
+  return `https://waze.com/ul?q=${encodeURIComponent(stop.rawAddress)}&navigate=yes`;
+}
+ 
+function appleMapsUrl(stop) {
+  return `https://maps.apple.com/?daddr=${encodeURIComponent(stopTarget(stop))}&dirflg=d`;
+}
+ 
+function googleMapsUrl(stop) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    stopTarget(stop)
+  )}&travelmode=driving`;
+}
+ 
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+ 
 function DashboardContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const justUpgraded = searchParams.get('abonnement') === 'succes';
   const fileInputRef = useRef(null);
+  const resultRef = useRef(null);
  
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -51,6 +84,7 @@ function DashboardContent() {
   const [error, setError] = useState(null);
   const [tournee, setTournee] = useState(null);
   const [history, setHistory] = useState([]);
+  const [openStopId, setOpenStopId] = useState(null);
  
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/connexion');
@@ -127,6 +161,7 @@ function DashboardContent() {
   const handleGenerate = async () => {
     setError(null);
     setScanInfo(null);
+    setOpenStopId(null);
     const addresses = input.split('\n').map((l) => l.trim()).filter(Boolean);
     if (addresses.length === 0) return;
  
@@ -149,6 +184,15 @@ function DashboardContent() {
     } finally {
       setLoading(false);
     }
+  };
+ 
+  // Rouvrir une tournée déjà triée : tout est déjà en base, rien à recalculer.
+  const handleOpenPast = (t) => {
+    setError(null);
+    setScanInfo(null);
+    setOpenStopId(null);
+    setTournee(t);
+    setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
  
   const handleUpgrade = async () => {
@@ -257,16 +301,60 @@ function DashboardContent() {
       )}
  
       {tournee && (
-        <div className="mt-8 rounded border border-gray-200 p-4">
+        <div ref={resultRef} className="mt-8 rounded border border-gray-200 p-4">
           <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">
-            Tournée générée — {tournee.stops.length} arrêts
+            Tournée du {formatDate(tournee.createdAt)} — {tournee.stops.length} arrêts
           </p>
-          <ol className="space-y-2">
+ 
+          <ol className="space-y-3">
             {tournee.stops.map((s, i) => (
-              <li key={s.id} className="flex gap-3 text-sm">
-                <span className="text-gray-400">{i + 1}.</span>
-                <span>{s.label || s.rawAddress}</span>
-                {!s.lat && <span className="text-xs text-amber-600">(non localisée)</span>}
+              <li key={s.id} className="border-b border-gray-100 pb-3 last:border-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex gap-3 text-sm">
+                    <span className="text-gray-400">{i + 1}.</span>
+                    <span>
+                      {s.label || s.rawAddress}
+                      {!s.lat && (
+                        <span className="ml-1 text-xs text-amber-600">(non localisée)</span>
+                      )}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setOpenStopId(openStopId === s.id ? null : s.id)}
+                    className="shrink-0 rounded bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                  >
+                    Y aller
+                  </button>
+                </div>
+ 
+                {openStopId === s.id && (
+                  <div className="ml-6 mt-2 flex flex-wrap gap-2">
+                    <a
+                      href={wazeUrl(s)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                    >
+                      Waze
+                    </a>
+                    <a
+                      href={appleMapsUrl(s)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                    >
+                      Plans
+                    </a>
+                    <a
+                      href={googleMapsUrl(s)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                    >
+                      Google Maps
+                    </a>
+                  </div>
+                )}
               </li>
             ))}
           </ol>
@@ -275,14 +363,30 @@ function DashboardContent() {
  
       {history.length > 0 && (
         <div className="mt-10">
-          <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">Historique</p>
-          <ul className="space-y-2 text-sm text-gray-600">
-            {history.map((t) => (
-              <li key={t.id} className="flex justify-between border-b border-gray-100 pb-2">
-                <span>{t.stops.length} arrêts</span>
-                <span>{new Date(t.createdAt).toLocaleDateString('fr-FR')}</span>
-              </li>
-            ))}
+          <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">
+            Tournées précédentes
+          </p>
+          <ul className="space-y-2">
+            {history.map((t) => {
+              const isOpen = tournee?.id === t.id;
+              return (
+                <li key={t.id}>
+                  <button
+                    onClick={() => handleOpenPast(t)}
+                    className={`flex w-full items-center justify-between rounded border px-3 py-2.5 text-left text-sm hover:border-navy ${
+                      isOpen ? 'border-navy bg-gray-50' : 'border-gray-200'
+                    }`}
+                  >
+                    <span className="font-medium text-gray-700">
+                      {formatDate(t.createdAt)} — {t.stops.length} arrêts
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {isOpen ? 'Affichée' : 'Rouvrir'}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
