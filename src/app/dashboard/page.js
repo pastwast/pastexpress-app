@@ -1,27 +1,27 @@
 'use client';
-
-import { useState, useEffect } from 'react';
+ 
+import { useState, useEffect, Suspense } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
-
+ 
 const FREE_LIMIT = 3;
-
-export default function Dashboard() {
+ 
+function DashboardContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const justUpgraded = searchParams.get('abonnement') === 'succes';
-
+ 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [tournee, setTournee] = useState(null);
   const [history, setHistory] = useState([]);
-
+ 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/connexion');
   }, [status, router]);
-
+ 
   useEffect(() => {
     if (status === 'authenticated') {
       fetch('/api/tournees')
@@ -30,22 +30,22 @@ export default function Dashboard() {
         .catch(() => {});
     }
   }, [status]);
-
+ 
   if (status !== 'authenticated') return null;
-
+ 
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
   const usedThisMonth = history.filter((t) => new Date(t.createdAt) >= startOfMonth).length;
-
+ 
   const plan = session?.user?.plan || 'FREE';
   const limitReached = plan === 'FREE' && usedThisMonth >= FREE_LIMIT;
-
+ 
   const handleGenerate = async () => {
     setError(null);
     const addresses = input.split('\n').map((l) => l.trim()).filter(Boolean);
     if (addresses.length === 0) return;
-
+ 
     setLoading(true);
     try {
       const res = await fetch('/api/tournees', {
@@ -66,14 +66,14 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-
+ 
   const handleUpgrade = async () => {
     const res = await fetch('/api/stripe/checkout', { method: 'POST' });
     const data = await res.json();
     if (data.url) window.location.href = data.url;
     else setError(data.error || "Impossible d'ouvrir le paiement.");
   };
-
+ 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
       <div className="mb-8 flex items-center justify-between">
@@ -85,13 +85,13 @@ export default function Dashboard() {
           Se déconnecter
         </button>
       </div>
-
+ 
       {justUpgraded && (
         <div className="mb-4 rounded bg-green-50 p-3 text-sm text-green-700">
           Abonnement Pro activé 🎉
         </div>
       )}
-
+ 
       <div className="mb-6 rounded border border-gray-200 bg-gray-50 p-4 text-sm">
         Plan <strong>{plan === 'PRO' ? 'Pro' : 'Gratuit'}</strong>
         {plan === 'FREE' && (
@@ -104,7 +104,7 @@ export default function Dashboard() {
           </>
         )}
       </div>
-
+ 
       <label className="mb-2 block text-sm font-medium">Adresses (une par ligne)</label>
       <textarea
         value={input}
@@ -113,9 +113,9 @@ export default function Dashboard() {
         placeholder={'12 rue des Lilas, 75011 Paris\n4 avenue Foch, 75016 Paris'}
         className="w-full rounded border border-gray-300 p-3 font-mono text-sm focus:border-navy focus:outline-none"
       />
-
+ 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-
+ 
       <button
         onClick={handleGenerate}
         disabled={loading || limitReached}
@@ -128,7 +128,7 @@ export default function Dashboard() {
           Passe au plan Pro pour générer des tournées illimitées ce mois-ci.
         </p>
       )}
-
+ 
       {tournee && (
         <div className="mt-8 rounded border border-gray-200 p-4">
           <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">
@@ -145,7 +145,7 @@ export default function Dashboard() {
           </ol>
         </div>
       )}
-
+ 
       {history.length > 0 && (
         <div className="mt-10">
           <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">Historique</p>
@@ -160,5 +160,13 @@ export default function Dashboard() {
         </div>
       )}
     </main>
+  );
+}
+ 
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<main className="mx-auto max-w-4xl px-6 py-10">Chargement…</main>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
