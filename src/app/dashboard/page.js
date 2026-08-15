@@ -78,6 +78,10 @@ function DashboardContent() {
   const resultRef = useRef(null);
  
   const [input, setInput] = useState('');
+  const [startMode, setStartMode] = useState('none'); // none | gps | address
+  const [startAddress, setStartAddress] = useState('');
+  const [gpsPosition, setGpsPosition] = useState(null);
+  const [gpsStatus, setGpsStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanInfo, setScanInfo] = useState(null);
@@ -109,6 +113,28 @@ function DashboardContent() {
   const plan = session?.user?.plan || 'FREE';
   const isPro = plan === 'PRO';
   const limitReached = !isPro && usedThisMonth >= FREE_LIMIT;
+ 
+  // La position n'est demandée qu'au moment où le livreur la choisit,
+  // et n'est jamais enregistrée en base.
+  const handleUseGps = () => {
+    if (!navigator.geolocation) {
+      setGpsStatus("Ce navigateur ne donne pas accès à la position.");
+      return;
+    }
+    setStartMode('gps');
+    setGpsStatus('Localisation en cours…');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setGpsStatus('Position trouvée.');
+      },
+      () => {
+        setGpsPosition(null);
+        setGpsStatus("Position refusée ou indisponible. Saisis une adresse de départ.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
  
   const handleScan = async (e) => {
     const file = e.target.files?.[0];
@@ -165,12 +191,18 @@ function DashboardContent() {
     const addresses = input.split('\n').map((l) => l.trim()).filter(Boolean);
     if (addresses.length === 0) return;
  
+    let start = null;
+    if (startMode === 'gps' && gpsPosition) start = gpsPosition;
+    else if (startMode === 'address' && startAddress.trim()) {
+      start = { address: startAddress.trim() };
+    }
+ 
     setLoading(true);
     try {
       const res = await fetch('/api/tournees', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses }),
+        body: JSON.stringify({ addresses, start }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -276,6 +308,57 @@ function DashboardContent() {
         <div className="mb-3 rounded bg-blue-50 p-3 text-sm text-blue-800">{scanInfo}</div>
       )}
  
+      {/* Point de départ */}
+      <div className="mb-5 rounded border border-gray-200 p-3">
+        <p className="mb-2 text-sm font-medium">Point de départ</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={handleUseGps}
+            className={`rounded border px-3 py-1.5 text-xs font-medium ${
+              startMode === 'gps'
+                ? 'border-navy bg-navy text-white'
+                : 'border-gray-300 text-gray-700 hover:border-navy'
+            }`}
+          >
+            📍 Ma position
+          </button>
+          <button
+            onClick={() => setStartMode('address')}
+            className={`rounded border px-3 py-1.5 text-xs font-medium ${
+              startMode === 'address'
+                ? 'border-navy bg-navy text-white'
+                : 'border-gray-300 text-gray-700 hover:border-navy'
+            }`}
+          >
+            🏢 Adresse du dépôt
+          </button>
+          <button
+            onClick={() => setStartMode('none')}
+            className={`rounded border px-3 py-1.5 text-xs font-medium ${
+              startMode === 'none'
+                ? 'border-navy bg-navy text-white'
+                : 'border-gray-300 text-gray-700 hover:border-navy'
+            }`}
+          >
+            Sans départ
+          </button>
+        </div>
+ 
+        {startMode === 'gps' && gpsStatus && (
+          <p className="mt-2 text-xs text-gray-500">{gpsStatus}</p>
+        )}
+ 
+        {startMode === 'address' && (
+          <input
+            type="text"
+            value={startAddress}
+            onChange={(e) => setStartAddress(e.target.value)}
+            placeholder="12 rue du Dépôt, 76000 Rouen"
+            className="mt-2 w-full rounded border border-gray-300 p-2 text-sm focus:border-navy focus:outline-none"
+          />
+        )}
+      </div>
+ 
       <label className="mb-2 block text-sm font-medium">Adresses (une par ligne)</label>
       <textarea
         value={input}
@@ -302,11 +385,14 @@ function DashboardContent() {
  
       {tournee && (
         <div ref={resultRef} className="mt-8 rounded border border-gray-200 p-4">
-          <p className="mb-3 text-xs uppercase tracking-widest text-gray-400">
+          <p className="mb-1 text-xs uppercase tracking-widest text-gray-400">
             Tournée du {formatDate(tournee.createdAt)} — {tournee.stops.length} arrêts
           </p>
+          {tournee.startLabel && (
+            <p className="mb-3 text-xs text-gray-500">Départ : {tournee.startLabel}</p>
+          )}
  
-          <ol className="space-y-3">
+          <ol className="mt-3 space-y-3">
             {tournee.stops.map((s, i) => (
               <li key={s.id} className="border-b border-gray-100 pb-3 last:border-0">
                 <div className="flex items-start justify-between gap-3">
