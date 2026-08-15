@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import TourneeMap from './TourneeMap';
  
 const FREE_LIMIT = 3;
 const MAX_DIMENSION = 1600; // suffisant pour lire du texte, assez léger pour l'envoi
@@ -392,7 +393,11 @@ function DashboardContent() {
             <p className="mb-3 text-xs text-gray-500">Départ : {tournee.startLabel}</p>
           )}
  
-          <ol className="mt-3 space-y-3">
+          <div className="mt-3">
+            <TourneeMap key={tournee.id} stops={tournee.stops} />
+          </div>
+ 
+          <ol className="space-y-3">
             {tournee.stops.map((s, i) => (
               <li key={s.id} className="border-b border-gray-100 pb-3 last:border-0">
                 <div className="flex items-start justify-between gap-3">
