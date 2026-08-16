@@ -13,6 +13,27 @@ const ROAD_FACTOR = 1.3; // les routes ne sont pas des lignes droites
 const AVG_SPEED_KMH = 25; // moyenne urbaine, feux et trafic compris
 const MINUTES_PER_STOP = 4; // se garer, livrer, repartir
 
+// Les coches et l'ordre manuel sont gardés dans l'appareil, pas sur le
+// serveur : c'est ce qui permet de cocher un arrêt sans réseau.
+function loadLocal(key, fallback) {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function saveLocal(key, value) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    // Stockage plein ou navigation privée : on continue sans mémoriser.
+  }
+}
+
 // Redimensionne et compresse la photo dans le navigateur avant l'envoi.
 // Une photo de téléphone brute fait 5 à 10 Mo, bien trop pour l'API.
 function fileToResizedBase64(file) {
@@ -70,12 +91,7 @@ function computeStats(stops) {
   const stopMin = list.length * MINUTES_PER_STOP;
   const totalMin = Math.round(drivingMin + stopMin);
 
-  return {
-    stops: list.length,
-    located: located.length,
-    km,
-    totalMin,
-  };
+  return { stops: list.length, located: located.length, km, totalMin };
 }
 
 function formatDuration(minutes) {
@@ -83,6 +99,10 @@ function formatDuration(minutes) {
   const m = minutes % 60;
   if (h === 0) return `${m} min`;
   return m === 0 ? `${h} h` : `${h} h ${String(m).padStart(2, '0')}`;
+}
+
+function formatKm(km) {
+  return km < 10 ? km.toFixed(1) : Math.round(km);
 }
 
 // Les coordonnées sont plus fiables que le texte pour un GPS :
@@ -135,21 +155,45 @@ function DashboardContent() {
   const [scanInfo, setScanInfo] = useState(null);
   const [error, setError] = useState(null);
   const [tournee, setTournee] = useState(null);
+  const [orderedStops, setOrderedStops] = useState([]);
+  const [delivered, setDelivered] = useState([]);
   const [history, setHistory] = useState([]);
   const [openStopId, setOpenStopId] = useState(null);
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/connexion');
   }, [status, router]);
 
   useEffect(() => {
-    if (status === 'authenticated') {
-      fetch('/api/tournees')
-        .then((r) => r.json())
-        .then((data) => setHistory(Array.isArray(data) ? data : []))
-        .catch(() => {});
-    }
+    if (typeof window === 'undefined') return;
+    const update = () => setIsOffline(!navigator.onLine);
+    update();
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    fetch('/api/tournees')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setHistory(data);
+          saveLocal('pastexpress:history', data);
+        } else {
+          setHistory(loadLocal('pastexpress:history', []));
+        }
+      })
+      .catch(() => {
+        // Hors ligne : on réaffiche la dernière liste connue.
+        setHistory(loadLocal('pastexpress:history', []));
+      });
   }, [status]);
 
   if (status !== 'authenticated') return null;
@@ -163,7 +207,48 @@ function DashboardContent() {
   const isPro = plan === 'PRO';
   const limitReached = !isPro && usedThisMonth >= FREE_LIMIT;
 
-  const stats = tournee ? computeStats(tournee.stops) : null;
+  const stats = orderedStops.length ? computeStats(orderedStops) : null;
+  const doneCount = orderedStops.filter((s) => delivered.includes(s.id)).length;
+
+  // Charge une tournée à l'écran en réappliquant l'ordre et les coches
+  // mémorisés sur cet appareil.
+  const showTournee = (t) => {
+    const savedOrder = loadLocal(`pastexpress:order:${t.id}`, null);
+    let stops = t.stops;
+    if (Array.isArray(savedOrder) && savedOrder.length === t.stops.length) {
+      const byId = new Map(t.stops.map((s) => [s.id, s]));
+      const rebuilt = savedOrder.map((id) => byId.get(id)).filter(Boolean);
+      if (rebuilt.length === t.stops.length) stops = rebuilt;
+    }
+    setTournee(t);
+    setOrderedStops(stops);
+    setDelivered(loadLocal(`pastexpress:delivered:${t.id}`, []));
+    setOpenStopId(null);
+  };
+
+  const toggleDelivered = (stopId) => {
+    setDelivered((prev) => {
+      const next = prev.includes(stopId)
+        ? prev.filter((id) => id !== stopId)
+        : [...prev, stopId];
+      if (tournee) saveLocal(`pastexpress:delivered:${tournee.id}`, next);
+      return next;
+    });
+  };
+
+  const moveStop = (index, direction) => {
+    const target = index + direction;
+    if (target < 0 || target >= orderedStops.length) return;
+    const next = [...orderedStops];
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrderedStops(next);
+    if (tournee) saveLocal(`pastexpress:order:${tournee.id}`, next.map((s) => s.id));
+  };
+
+  const resetProgress = () => {
+    setDelivered([]);
+    if (tournee) saveLocal(`pastexpress:delivered:${tournee.id}`, []);
+  };
 
   // La position n'est demandée qu'au moment où le livreur la choisit,
   // et n'est jamais enregistrée en base.
@@ -189,7 +274,6 @@ function DashboardContent() {
 
   const handleScan = async (e) => {
     const file = e.target.files?.[0];
-    // Permet de rescanner la même photo si besoin
     e.target.value = '';
     if (!file) return;
 
@@ -216,8 +300,6 @@ function DashboardContent() {
         return;
       }
 
-      // On ajoute à ce qui est déjà saisi, pour permettre de scanner
-      // plusieurs feuilles à la suite.
       setInput((prev) => {
         const existing = prev.trim();
         const scanned = data.addresses.join('\n');
@@ -238,7 +320,6 @@ function DashboardContent() {
   const handleGenerate = async () => {
     setError(null);
     setScanInfo(null);
-    setOpenStopId(null);
     const addresses = input.split('\n').map((l) => l.trim()).filter(Boolean);
     if (addresses.length === 0) return;
 
@@ -259,22 +340,26 @@ function DashboardContent() {
       if (!res.ok) {
         setError(data.error || 'Une erreur est survenue.');
       } else {
-        setTournee(data);
-        setHistory((h) => [data, ...h]);
+        showTournee(data);
+        const nextHistory = [data, ...history];
+        setHistory(nextHistory);
+        saveLocal('pastexpress:history', nextHistory);
       }
     } catch (e) {
-      setError('Impossible de contacter le serveur.');
+      setError(
+        isOffline
+          ? "Hors ligne : impossible de créer une tournée. Les tournées déjà générées restent consultables."
+          : 'Impossible de contacter le serveur.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // Rouvrir une tournée déjà triée : tout est déjà en base, rien à recalculer.
   const handleOpenPast = (t) => {
     setError(null);
     setScanInfo(null);
-    setOpenStopId(null);
-    setTournee(t);
+    showTournee(t);
     setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
 
@@ -296,6 +381,13 @@ function DashboardContent() {
           Se déconnecter
         </button>
       </div>
+
+      {isOffline && (
+        <div className="mb-4 rounded bg-amber-50 p-3 text-sm text-amber-800">
+          📶 Hors ligne — tes tournées restent consultables, mais tu ne peux pas en générer
+          de nouvelle pour l&apos;instant.
+        </div>
+      )}
 
       {justUpgraded && (
         <div className="mb-4 rounded bg-green-50 p-3 text-sm text-green-700">
@@ -329,7 +421,7 @@ function DashboardContent() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={scanning}
+            disabled={scanning || isOffline}
             className="flex w-full items-center justify-center gap-2 rounded border-2 border-dashed border-gray-300 py-4 text-sm font-semibold text-gray-700 hover:border-navy hover:text-navy disabled:opacity-50"
           >
             {scanning ? 'Lecture de la photo…' : '📷 Scanner une feuille de tournée'}
@@ -423,7 +515,7 @@ function DashboardContent() {
 
       <button
         onClick={handleGenerate}
-        disabled={loading || limitReached}
+        disabled={loading || limitReached || isOffline}
         className="mt-4 rounded bg-navy px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
       >
         {loading ? 'Génération...' : limitReached ? 'Limite atteinte' : 'Générer la tournée'}
@@ -443,21 +535,41 @@ function DashboardContent() {
             <p className="mb-2 text-xs text-gray-500">Départ : {tournee.startLabel}</p>
           )}
 
-          {/* Résumé de la tournée */}
-          <div className="mb-4 grid grid-cols-3 gap-2 rounded bg-gray-50 p-3 text-center">
+          {/* Résumé */}
+          <div className="mb-3 grid grid-cols-3 gap-2 rounded bg-gray-50 p-3 text-center">
             <div>
               <p className="font-display text-xl">{stats.stops}</p>
               <p className="text-xs text-gray-500">arrêts</p>
             </div>
             <div>
-              <p className="font-display text-xl">
-                {stats.km < 10 ? stats.km.toFixed(1) : Math.round(stats.km)} km
-              </p>
+              <p className="font-display text-xl">{formatKm(stats.km)} km</p>
               <p className="text-xs text-gray-500">estimés</p>
             </div>
             <div>
               <p className="font-display text-xl">{formatDuration(stats.totalMin)}</p>
               <p className="text-xs text-gray-500">estimées</p>
+            </div>
+          </div>
+
+          {/* Avancement */}
+          <div className="mb-3">
+            <div className="mb-1 flex items-center justify-between text-xs">
+              <span className="font-semibold text-gray-700">
+                {doneCount}/{stats.stops} livrés
+              </span>
+              {doneCount > 0 && (
+                <button onClick={resetProgress} className="text-gray-400 underline">
+                  Réinitialiser
+                </button>
+              )}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
+              <div
+                className="h-full bg-green-600 transition-all"
+                style={{
+                  width: `${stats.stops ? (doneCount / stats.stops) * 100 : 0}%`,
+                }}
+              />
             </div>
           </div>
 
@@ -470,72 +582,100 @@ function DashboardContent() {
           {showAssumptions && (
             <div className="mb-3 rounded bg-gray-50 p-3 text-xs leading-relaxed text-gray-600">
               Distance à vol d’oiseau entre les arrêts, majorée de 30 % pour tenir compte des
-              routes. Durée = trajet à {AVG_SPEED_KMH} km/h de moyenne (trafic et feux
-              compris) + {MINUTES_PER_STOP} min par arrêt. C’est un ordre de grandeur, pas un
-              calcul d’itinéraire réel : compte environ 15 % d’écart.
-              {stats.located < stats.stops && (
-                <>
-                  {' '}
-                  {stats.stops - stats.located} adresse(s) non localisée(s) ne comptent pas
-                  dans la distance.
-                </>
-              )}
+              routes. Durée = trajet à {AVG_SPEED_KMH} km/h de moyenne + {MINUTES_PER_STOP} min
+              par arrêt. Ordre de grandeur, pas un calcul d’itinéraire réel.
             </div>
           )}
 
-          <TourneeMap key={tournee.id} stops={tournee.stops} />
+          <TourneeMap key={tournee.id + orderedStops.map((s) => s.id).join('')} stops={orderedStops} />
 
           <ol className="space-y-3">
-            {tournee.stops.map((s, i) => (
-              <li key={s.id} className="border-b border-gray-100 pb-3 last:border-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex gap-3 text-sm">
-                    <span className="text-gray-400">{i + 1}.</span>
-                    <span>
-                      {s.label || s.rawAddress}
-                      {!s.lat && (
-                        <span className="ml-1 text-xs text-amber-600">(non localisée)</span>
-                      )}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setOpenStopId(openStopId === s.id ? null : s.id)}
-                    className="shrink-0 rounded bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
-                  >
-                    Y aller
-                  </button>
-                </div>
+            {orderedStops.map((s, i) => {
+              const isDone = delivered.includes(s.id);
+              return (
+                <li key={s.id} className="border-b border-gray-100 pb-3 last:border-0">
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={isDone}
+                      onChange={() => toggleDelivered(s.id)}
+                      className="mt-1 h-5 w-5 shrink-0 accent-green-600"
+                      aria-label={`Marquer l'arrêt ${i + 1} comme livré`}
+                    />
 
-                {openStopId === s.id && (
-                  <div className="ml-6 mt-2 flex flex-wrap gap-2">
-                    <a
-                      href={wazeUrl(s)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
-                    >
-                      Waze
-                    </a>
-                    <a
-                      href={appleMapsUrl(s)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
-                    >
-                      Plans
-                    </a>
-                    <a
-                      href={googleMapsUrl(s)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
-                    >
-                      Google Maps
-                    </a>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex gap-2 text-sm">
+                        <span className="text-gray-400">{i + 1}.</span>
+                        <span className={isDone ? 'text-gray-400 line-through' : ''}>
+                          {s.label || s.rawAddress}
+                          {!s.lat && (
+                            <span className="ml-1 text-xs text-amber-600">
+                              (non localisée)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+
+                      {openStopId === s.id && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <a
+                            href={wazeUrl(s)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                          >
+                            Waze
+                          </a>
+                          <a
+                            href={appleMapsUrl(s)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                          >
+                            Plans
+                          </a>
+                          <a
+                            href={googleMapsUrl(s)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-navy hover:text-navy"
+                          >
+                            Google Maps
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => moveStop(i, -1)}
+                          disabled={i === 0}
+                          className="px-1.5 text-xs text-gray-400 hover:text-navy disabled:opacity-25"
+                          aria-label="Monter cet arrêt"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          onClick={() => moveStop(i, 1)}
+                          disabled={i === orderedStops.length - 1}
+                          className="px-1.5 text-xs text-gray-400 hover:text-navy disabled:opacity-25"
+                          aria-label="Descendre cet arrêt"
+                        >
+                          ▼
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setOpenStopId(openStopId === s.id ? null : s.id)}
+                        className="rounded bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                      >
+                        Y aller
+                      </button>
+                    </div>
                   </div>
-                )}
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}
@@ -558,8 +698,7 @@ function DashboardContent() {
                     }`}
                   >
                     <span className="font-medium text-gray-700">
-                      {formatDate(t.createdAt)} — {s.stops} arrêts ·{' '}
-                      {s.km < 10 ? s.km.toFixed(1) : Math.round(s.km)} km
+                      {formatDate(t.createdAt)} — {s.stops} arrêts · {formatKm(s.km)} km
                     </span>
                     <span className="text-xs text-gray-500">
                       {isOpen ? 'Affichée' : 'Rouvrir'}
