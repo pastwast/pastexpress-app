@@ -2,11 +2,389 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: var(--font-body), system-ui, sans-serif;
-  background-color: #ffffff;
+/* =========================================================
+   PasteExpress — direction visuelle "signalisation routière"
+   Asphalte, jaune de déviation, rouge de borne kilométrique.
+   ========================================================= */
+
+:root {
+  --asphalte: #1b1e24;
+  --asphalte-2: #262b34;
+  --beton: #e9e9e3;
+  --blanc: #fafaf7;
+  --jaune: #ffc53d;
+  --rouge: #c2402f;
+  --vert: #2e7d5b;
+  --gris: #6c7280;
+  --gris-clair: #9aa0a8;
+  --trait: #d4d4cc;
+  --radius: 3px;
 }
 
-.font-display {
-  font-family: var(--font-display), sans-serif;
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: var(--font-body), system-ui, sans-serif;
+  background: var(--beton);
+  color: var(--asphalte);
+  margin: 0;
+}
+
+.pe-display {
+  font-family: var(--font-display), Impact, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.pe-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Bandeau supérieur : plaque d'immatriculation renversée --- */
+.pe-topbar {
+  background: var(--asphalte);
+  color: var(--blanc);
+  padding: 0.9rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pe-wordmark {
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pe-wordmark span {
+  color: var(--jaune);
+}
+
+/* Marquage au sol : le seul ornement autorisé de la page. */
+.pe-roadline {
+  height: 6px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--jaune) 0 34px,
+    transparent 34px 62px
+  );
+}
+
+.pe-shell {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+/* --- Blocs --- */
+.pe-card {
+  background: var(--blanc);
+  border: 1px solid var(--trait);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.pe-eyebrow {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gris);
+}
+
+/* --- Formulaires --- */
+.pe-field {
+  width: 100%;
+  background: var(--blanc);
+  border: 1px solid var(--trait);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.9rem;
+  color: var(--asphalte);
+}
+
+.pe-field:focus {
+  outline: 2px solid var(--jaune);
+  outline-offset: -1px;
+  border-color: var(--asphalte);
+}
+
+.pe-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+/* --- Boutons --- */
+.pe-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  background: var(--asphalte);
+  color: var(--blanc);
+  border: 1px solid var(--asphalte);
+  border-radius: var(--radius);
+  padding: 0.8rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.pe-btn:active {
+  transform: translateY(1px);
+}
+
+.pe-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pe-btn-signal {
+  background: var(--jaune);
+  border-color: var(--jaune);
+  color: var(--asphalte);
+}
+
+.pe-btn-ghost {
+  background: transparent;
+  color: var(--asphalte);
+  border-color: var(--trait);
+  font-weight: 600;
+}
+
+.pe-btn-ghost[data-on='true'] {
+  background: var(--asphalte);
+  color: var(--blanc);
+  border-color: var(--asphalte);
+}
+
+.pe-btn-sm {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.72rem;
+}
+
+.pe-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--gris);
+  font-size: 0.78rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* --- Bandeaux d'état --- */
+.pe-note {
+  border-left: 4px solid var(--asphalte);
+  background: var(--blanc);
+  padding: 0.7rem 0.85rem;
+  font-size: 0.85rem;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.pe-note-signal { border-left-color: var(--jaune); }
+.pe-note-ok { border-left-color: var(--vert); color: #1e5a41; }
+.pe-note-alerte { border-left-color: var(--rouge); color: #8f2b1e; }
+
+/* --- Compteurs : lecture instrument de bord --- */
+.pe-gauges {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--asphalte);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--asphalte);
+  gap: 1px;
+}
+
+.pe-gauge {
+  background: var(--blanc);
+  padding: 0.75rem 0.5rem;
+  text-align: center;
+}
+
+.pe-gauge-value {
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.pe-gauge-label {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gris);
+  margin-top: 0.25rem;
+}
+
+/* =========================================================
+   SIGNATURE — la tournée comme une route jalonnée de bornes.
+   Le trait vertical est la route ; il devient vert derrière
+   les arrêts livrés : le livreur voit son chemin se consommer.
+   ========================================================= */
+.pe-route {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.pe-stop {
+  position: relative;
+  display: flex;
+  gap: 0.85rem;
+  padding: 0.55rem 0 0.55rem 0;
+}
+
+/* la route entre deux bornes */
+.pe-stop::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--trait);
+}
+
+.pe-stop:first-child::before { top: 18px; }
+.pe-stop:last-child::before { bottom: calc(100% - 18px); }
+
+.pe-stop[data-done='true']::before { background: var(--vert); }
+
+.pe-borne {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 32px;
+  height: 38px;
+  border: 1px solid var(--asphalte);
+  border-radius: 2px 2px 3px 3px;
+  background: var(--blanc);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+/* la coiffe rouge de la borne kilométrique */
+.pe-borne::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--rouge);
+}
+
+.pe-stop[data-done='true'] .pe-borne::before { background: var(--vert); }
+.pe-stop[data-done='true'] .pe-borne { color: var(--gris-clair); }
+
+.pe-stop-body { flex: 1; min-width: 0; padding-top: 0.15rem; }
+
+.pe-adresse {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.pe-stop[data-done='true'] .pe-adresse {
+  color: var(--gris-clair);
+  text-decoration: line-through;
+}
+
+.pe-flag {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rouge);
+}
+
+.pe-actions { display: flex; gap: 0.35rem; align-items: flex-start; }
+
+.pe-nudge {
+  background: none;
+  border: 1px solid var(--trait);
+  border-radius: 2px;
+  color: var(--gris);
+  width: 24px;
+  height: 20px;
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pe-nudge:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* --- Avancement : une bande d'asphalte qui se remplit --- */
+.pe-progress {
+  height: 10px;
+  background: var(--asphalte);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.pe-progress-fill {
+  height: 100%;
+  background: var(--vert);
+  transition: width 0.45s cubic-bezier(0.3, 0.9, 0.3, 1);
+}
+
+/* --- Carte --- */
+.pe-map {
+  height: 290px;
+  width: 100%;
+  border: 1px solid var(--asphalte);
+  border-radius: var(--radius);
+  background: var(--trait);
+}
+
+/* --- Verrou plan Pro --- */
+.pe-locked {
+  border: 2px dashed var(--trait);
+  border-radius: var(--radius);
+  padding: 1.1rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* --- Scan --- */
+.pe-scan {
+  width: 100%;
+  border: 2px dashed var(--asphalte);
+  border-radius: var(--radius);
+  background: var(--jaune);
+  padding: 1rem;
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--asphalte);
+  cursor: pointer;
+}
+
+.pe-scan:disabled { opacity: 0.5; cursor: wait; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
 }
